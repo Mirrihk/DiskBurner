@@ -23,7 +23,7 @@ public sealed class TrackInfo
     public string Artist { get; set; } = "";
     public int TrackNumber { get; set; }
 
-    public string SourceFile { get; set; } = ""; // temp m4a/webm
+    public string SourceFile { get; set; } = ""; // temp download
     public string WavFile { get; set; } = "";    // 44.1k/16-bit stereo
     public TimeSpan? Duration { get; set; }
 }
@@ -53,9 +53,7 @@ public sealed class AlbumEngine
 
     // WinForms can subscribe to these
     public event Action<string>? Log;
-    public event Action<int>? Progress; // 0..100
-
-    public void SetLogger(Action<string> log) => Log += log;
+    public event Action<int>? Progress; // 0..100 (overall per-track progress)
 
     public async Task<AlbumProject> BuildProjectFromUrlsAsync(
         string albumTitle,
@@ -66,13 +64,17 @@ public sealed class AlbumEngine
         string? outputRootDir = null,
         CancellationToken ct = default)
     {
-        albumTitle = albumTitle.Trim();
-        albumArtist = albumArtist.Trim();
-        genre = genre.Trim();
-        year = year.Trim();
+        albumTitle = (albumTitle ?? "").Trim();
+        albumArtist = (albumArtist ?? "").Trim();
+        genre = (genre ?? "").Trim();
+        year = (year ?? "").Trim();
 
-        var root = outputRootDir ??
-                   Path.Combine(Environment.CurrentDirectory, FileName.Safe(albumTitle));
+        if (string.IsNullOrWhiteSpace(albumTitle)) albumTitle = "Untitled Album";
+        if (string.IsNullOrWhiteSpace(albumArtist)) albumArtist = "Various Artists";
+        if (string.IsNullOrWhiteSpace(genre)) genre = "Unknown";
+        if (string.IsNullOrWhiteSpace(year)) year = DateTime.Now.Year.ToString();
+
+        var root = outputRootDir ?? Path.Combine(Environment.CurrentDirectory, FileName.Safe(albumTitle));
         Directory.CreateDirectory(root);
 
         var project = new AlbumProject
@@ -139,6 +141,7 @@ public sealed class AlbumEngine
         if (project.Tracks.Count == 0)
         {
             Log?.Invoke("No tracks in project.");
+            Progress?.Invoke(0);
             return;
         }
 
@@ -176,12 +179,12 @@ public sealed class AlbumEngine
                 continue;
             }
 
-            // Use extension from stream container (m4a/webm/etc.)
-            var ext = audio.Container.Name; // e.g. "mp4"/"webm"
+            // Use extension from stream container (mp4/webm/etc.)
+            var ext = audio.Container.Name; // e.g. "mp4" / "webm"
             t.SourceFile = Path.Combine(project.OutputDir, $"{t.TrackNumber:D2}_temp.{ext}");
 
             Log?.Invoke("Downloading audio…");
-            await _youtube.Videos.Streams.DownloadAsync(audio, t.SourceFile, ct);
+            await _youtube.Videos.Streams.DownloadAsync(audio, t.SourceFile);
             Log?.Invoke("Download complete.");
 
             Log?.Invoke("Converting to WAV (44.1kHz, 16-bit, stereo)…");
@@ -202,7 +205,8 @@ public sealed class AlbumEngine
             var ffprobe = Path.Combine(Path.GetDirectoryName(FfmpegPath) ?? "", "ffprobe.exe");
             if (File.Exists(ffprobe))
             {
-                var probe = Proc.Run(ffprobe,
+                var probe = Proc.Run(
+                    ffprobe,
                     $"-v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 \"{t.WavFile}\"",
                     redirectStdOut: true);
 
@@ -323,13 +327,12 @@ file static class FileName
 {
     public static string Safe(string name)
     {
-        name = name.Trim();
+        name = (name ?? "").Trim();
         if (name.Length == 0) return "untitled";
 
         foreach (var c in Path.GetInvalidFileNameChars())
             name = name.Replace(c, '_');
 
-        // collapse whitespace/underscores a bit
         name = Regex.Replace(name, @"\s+", " ").Trim();
         name = Regex.Replace(name, @"_+", "_").Trim('_');
 
@@ -339,12 +342,12 @@ file static class FileName
 
 file static class Cue
 {
-    public static string Escape(string s) => s.Replace("\"", "''");
+    public static string Escape(string s) => (s ?? "").Replace("\"", "''");
 }
 
 file static class Web
 {
-    public static string EscapeHtml(string s) => System.Net.WebUtility.HtmlEncode(s);
+    public static string EscapeHtml(string s) => System.Net.WebUtility.HtmlEncode(s ?? "");
 }
 
 file static class Fmt

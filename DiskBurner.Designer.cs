@@ -1,6 +1,6 @@
 ﻿namespace DiskBurner
 {
-    partial class Form1
+    partial class DiskBurner
     {
         /// <summary>
         ///  Required designer variable.
@@ -28,12 +28,22 @@
         /// </summary>
         private void InitializeComponent()
         {
-            this.components = new System.ComponentModel.Container();
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(800, 450);
-            this.Text = "Form1";
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(DiskBurner));
+            SuspendLayout();
+            // 
+            // DiskBurner
+            // 
+            resources.ApplyResources(this, "$this");
+            AutoScaleMode = AutoScaleMode.Font;
+            DoubleBuffered = true;
+            ForeColor = Color.WhiteSmoke;
+            FormBorderStyle = FormBorderStyle.Fixed3D;
+            Name = "DiskBurner";
+            Load += DiskBurner_Load;
+            ResumeLayout(false);
         }
 
         #endregion
+
     }
 }
