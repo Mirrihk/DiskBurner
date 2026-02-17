@@ -1,229 +1,344 @@
-using System;
+﻿using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace DiskBurner
 {
-    public partial class DiskBurner : Form
+    public sealed class DiskBurner : Form
     {
+        // ===== Win32 (drag window when borderless) =====
+        [DllImport("user32.dll")] private static extern bool ReleaseCapture();
+
+        private void InitializeComponent()
+        {
+
+        }
+
+        [DllImport("user32.dll")] private static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+
+        // ===== Theme =====
+        private static readonly Color Bg = Color.Black;
+        private static readonly Color PanelBg = Color.FromArgb(18, 18, 18);
+        private static readonly Color Border = Color.FromArgb(60, 60, 60);
+        private static readonly Color TextCol = Color.Gainsboro;
+
+        // ===== Engine =====
         private readonly AlbumEngine _engine = new();
         private AlbumProject? _project;
 
-        // --- UI controls ---
-        private TextBox txtAlbumTitle = null!;
-        private TextBox txtAlbumArtist = null!;
-        private TextBox txtGenre = null!;
-        private TextBox txtYear = null!;
-        private TextBox txtUrls = null!;
-        private TextBox txtLog = null!;
-        private ProgressBar progress = null!;
-        private Button btnBuild = null!;
-        private Button btnDownload = null!;
-        private Button btnCue = null!;
-        private Button btnCover = null!;
-        private Button btnSave = null!;
-        private Button btnBurn = null!;
-        private Button btnOpenFolder = null!;
+        // ===== UI =====
+        private Panel _titleBar = null!;
+        private Label _title = null!;
+        private Button _minBtn = null!;
+        private Button _closeBtn = null!;
+
+        private TextBox _albumTitle = null!;
+        private TextBox _albumArtist = null!;
+        private TextBox _genre = null!;
+        private TextBox _year = null!;
+        private TextBox _urls = null!;
+        private TextBox _log = null!;
+        private ProgressBar _progress = null!;
+
+        private Button _btnBuild = null!;
+        private Button _btnDownload = null!;
+        private Button _btnCue = null!;
+        private Button _btnCover = null!;
+        private Button _btnSave = null!;
+        private Button _btnBurn = null!;
+        private Button _btnOpenFolder = null!;
 
         public DiskBurner()
         {
-            InitializeComponent();
+            // Borderless so what you see is what you run
+            FormBorderStyle = FormBorderStyle.None;
+            Padding = new Padding(1);
+            BackColor = Bg;
+            ForeColor = TextCol;
+            StartPosition = FormStartPosition.CenterScreen;
+            Width = 1100;
+            Height = 780;
+            Text = "DiskBurner";
+
             BuildUi();
-
-            // Hook engine output -> UI
-            _engine.Log += msg => UiLog(msg);
-            _engine.Progress += p => UiProgress(p);
-
-            // Sensible defaults
-            txtYear.Text = DateTime.Now.Year.ToString();
-            txtGenre.Text = "Unknown";
-            txtAlbumArtist.Text = "Various Artists";
-        }
-
-        private void DiskBurner_Load(object sender, EventArgs e)
-        {
-            // Optional startup code
+            HookEngine();
+            SetDefaults();
+            SetButtonsEnabled(false);
+            _btnBuild.Enabled = true;
         }
 
         // =========================
-        // UI Construction (No Designer Needed)
+        // UI
         // =========================
         private void BuildUi()
         {
-            Text = "DiskBurner";
-            Width = 1100;
-            Height = 780;
-            StartPosition = FormStartPosition.CenterScreen;
-
             var root = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 2,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(12),
+                BackColor = Bg
             };
+
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 150));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 45));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));     // title bar
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 160));    // meta
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 55));      // urls/actions
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 45));      // log
+
             Controls.Add(root);
 
-            // --- Album info group ---
-            var grpMeta = new GroupBox { Text = "Album Info", Dock = DockStyle.Fill };
-            root.Controls.Add(grpMeta, 0, 0);
-            root.SetColumnSpan(grpMeta, 2);
+            // ----- Title bar -----
+            _titleBar = new Panel { Dock = DockStyle.Fill, Height = 44, BackColor = PanelBg };
+            _titleBar.MouseDown += TitleBar_MouseDown;
 
-            var meta = new TableLayoutPanel
+            _title = new Label
+            {
+                Text = "DiskBurner",
+                AutoSize = true,
+                ForeColor = TextCol,
+                Location = new Point(12, 13)
+            };
+            _title.MouseDown += TitleBar_MouseDown;
+
+            _minBtn = TitleButton("–", BtnMin_Click);
+            _closeBtn = TitleButton("X", BtnClose_Click);
+
+            _titleBar.Controls.Add(_title);
+            _titleBar.Controls.Add(_minBtn);
+            _titleBar.Controls.Add(_closeBtn);
+            _titleBar.Resize += (_, __) =>
+            {
+                _closeBtn.Location = new Point(_titleBar.Width - _closeBtn.Width, 0);
+                _minBtn.Location = new Point(_titleBar.Width - _closeBtn.Width - _minBtn.Width, 0);
+            };
+
+            root.Controls.Add(_titleBar, 0, 0);
+            root.SetColumnSpan(_titleBar, 2);
+
+            // ----- Meta section -----
+            var metaGrid = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 4,
                 RowCount = 2,
-                Padding = new Padding(10)
+                Padding = new Padding(12),
+                BackColor = PanelBg
             };
-            meta.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            meta.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
-            meta.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
-            meta.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
-            meta.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            meta.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
-            grpMeta.Controls.Add(meta);
 
-            txtAlbumTitle = NewTextBox();
-            txtAlbumArtist = NewTextBox();
-            txtGenre = NewTextBox();
-            txtYear = NewTextBox();
+            metaGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            metaGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55));
+            metaGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
+            metaGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45));
+            metaGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+            metaGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
 
-            meta.Controls.Add(new Label { Text = "Album Title", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 0);
-            meta.Controls.Add(txtAlbumTitle, 1, 0);
-            meta.Controls.Add(new Label { Text = "Year", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 0);
-            meta.Controls.Add(txtYear, 3, 0);
+            _albumTitle = NewTextBox();
+            _albumArtist = NewTextBox();
+            _genre = NewTextBox();
+            _year = NewTextBox();
 
-            meta.Controls.Add(new Label { Text = "Album Artist", AutoSize = true, Anchor = AnchorStyles.Left }, 0, 1);
-            meta.Controls.Add(txtAlbumArtist, 1, 1);
-            meta.Controls.Add(new Label { Text = "Genre", AutoSize = true, Anchor = AnchorStyles.Left }, 2, 1);
-            meta.Controls.Add(txtGenre, 3, 1);
+            metaGrid.Controls.Add(NewLabel("Album Title"), 0, 0);
+            metaGrid.Controls.Add(_albumTitle, 1, 0);
+            metaGrid.Controls.Add(NewLabel("Year"), 2, 0);
+            metaGrid.Controls.Add(_year, 3, 0);
 
-            // --- URLs group ---
-            var grpUrls = new GroupBox { Text = "YouTube URLs (one per line)", Dock = DockStyle.Fill };
-            root.Controls.Add(grpUrls, 0, 1);
+            metaGrid.Controls.Add(NewLabel("Album Artist"), 0, 1);
+            metaGrid.Controls.Add(_albumArtist, 1, 1);
+            metaGrid.Controls.Add(NewLabel("Genre"), 2, 1);
+            metaGrid.Controls.Add(_genre, 3, 1);
 
-            txtUrls = new TextBox
+            root.Controls.Add(Section("Album Info", metaGrid), 0, 1);
+            root.SetColumnSpan(root.GetControlFromPosition(0, 1), 2);
+
+            // ----- URLs -----
+            _urls = new TextBox
             {
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical,
                 Dock = DockStyle.Fill,
-                Font = new System.Drawing.Font("Consolas", 10),
+                Font = new Font("Consolas", 10),
+                BackColor = Color.FromArgb(12, 12, 12),
+                ForeColor = TextCol,
+                BorderStyle = BorderStyle.FixedSingle
             };
-            grpUrls.Controls.Add(txtUrls);
+            root.Controls.Add(Section("YouTube URLs (one per line)", _urls), 0, 2);
 
-            // --- Actions group ---
-            var grpActions = new GroupBox { Text = "Actions", Dock = DockStyle.Fill };
-            root.Controls.Add(grpActions, 1, 1);
-
-            var actions = new FlowLayoutPanel
+            // ----- Actions -----
+            var actionsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                Padding = new Padding(10),
-                AutoScroll = true
+                AutoScroll = true,
+                Padding = new Padding(12),
+                BackColor = PanelBg
             };
-            grpActions.Controls.Add(actions);
 
-            btnBuild = NewButton("1) Build Project (fetch titles)", async (_, __) => await BuildProjectAsync());
-            btnDownload = NewButton("2) Download + Convert (WAV)", async (_, __) => await DownloadAsync());
-            btnCue = NewButton("3) Generate CUE", (_, __) => GenerateCue());
-            btnCover = NewButton("4) Generate Cover HTML", (_, __) => GenerateCover());
-            btnSave = NewButton("5) Save Project JSON", async (_, __) => await SaveProjectAsync());
-            btnBurn = NewButton("6) Burn with ImgBurn", (_, __) => Burn());
-            btnOpenFolder = NewButton("Open Output Folder", (_, __) => OpenFolder());
+            _btnBuild = NewButton("1) Build Project (fetch titles)", async (_, __) => await BuildProjectAsync());
+            _btnDownload = NewButton("2) Download + Convert (WAV)", async (_, __) => await DownloadAsync());
+            _btnCue = NewButton("3) Generate CUE", (_, __) => GenerateCue());
+            _btnCover = NewButton("4) Generate Cover HTML", (_, __) => GenerateCover());
+            _btnSave = NewButton("5) Save Project JSON", async (_, __) => await SaveProjectAsync());
+            _btnBurn = NewButton("6) Burn with ImgBurn", (_, __) => Burn());
+            _btnOpenFolder = NewButton("Open Output Folder", (_, __) => OpenFolder());
 
-            actions.Controls.Add(btnBuild);
-            actions.Controls.Add(btnDownload);
-            actions.Controls.Add(btnCue);
-            actions.Controls.Add(btnCover);
-            actions.Controls.Add(btnSave);
-            actions.Controls.Add(btnBurn);
-            actions.Controls.Add(new Label { Height = 8 });
-            actions.Controls.Add(btnOpenFolder);
+            actionsPanel.Controls.Add(_btnBuild);
+            actionsPanel.Controls.Add(_btnDownload);
+            actionsPanel.Controls.Add(_btnCue);
+            actionsPanel.Controls.Add(_btnCover);
+            actionsPanel.Controls.Add(_btnSave);
+            actionsPanel.Controls.Add(_btnBurn);
+            actionsPanel.Controls.Add(new Label { Height = 8 });
+            actionsPanel.Controls.Add(_btnOpenFolder);
 
-            // --- Log group ---
-            var grpLog = new GroupBox { Text = "Log", Dock = DockStyle.Fill };
-            root.Controls.Add(grpLog, 0, 2);
-            root.SetColumnSpan(grpLog, 2);
+            root.Controls.Add(Section("Actions", actionsPanel), 1, 2);
 
-            var logLayout = new TableLayoutPanel
+            // ----- Log -----
+            var logGrid = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
                 RowCount = 2,
-                Padding = new Padding(10)
+                Padding = new Padding(12),
+                BackColor = PanelBg
             };
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-            logLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            grpLog.Controls.Add(logLayout);
+            logGrid.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+            logGrid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            progress = new ProgressBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100 };
-            txtLog = new TextBox
+            _progress = new ProgressBar { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100 };
+            _log = new TextBox
             {
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
                 Dock = DockStyle.Fill,
-                Font = new System.Drawing.Font("Consolas", 10),
+                Font = new Font("Consolas", 10),
+                BackColor = Color.FromArgb(12, 12, 12),
+                ForeColor = TextCol,
+                BorderStyle = BorderStyle.FixedSingle
             };
 
-            logLayout.Controls.Add(progress, 0, 0);
-            logLayout.Controls.Add(txtLog, 0, 1);
+            logGrid.Controls.Add(_progress, 0, 0);
+            logGrid.Controls.Add(_log, 0, 1);
 
-            // start state
-            SetButtonsEnabled(false);
-            btnBuild.Enabled = true;
+            root.Controls.Add(Section("Log", logGrid), 0, 3);
+            root.SetColumnSpan(root.GetControlFromPosition(0, 3), 2);
         }
 
+        private Control Section(string title, Control content)
+        {
+            var host = new Panel { Dock = DockStyle.Fill, BackColor = PanelBg, Padding = new Padding(10) };
+            host.Paint += (_, e) =>
+            {
+                using var p = new Pen(Border);
+                e.Graphics.DrawRectangle(p, 0, 0, host.Width - 1, host.Height - 1);
+            };
+
+            var lbl = new Label
+            {
+                Text = title,
+                ForeColor = TextCol,
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Padding = new Padding(2, 0, 0, 8)
+            };
+
+            content.Dock = DockStyle.Fill;
+            host.Controls.Add(content);
+            host.Controls.Add(lbl);
+            return host;
+        }
+
+        private static Label NewLabel(string text)
+            => new Label { Text = text, AutoSize = true, ForeColor = TextCol, Anchor = AnchorStyles.Left };
+
         private static TextBox NewTextBox()
-            => new TextBox { Dock = DockStyle.Fill };
+            => new TextBox
+            {
+                Dock = DockStyle.Fill,
+                BackColor = Color.FromArgb(12, 12, 12),
+                ForeColor = TextCol,
+                BorderStyle = BorderStyle.FixedSingle
+            };
 
         private static Button NewButton(string text, EventHandler onClick)
         {
             var b = new Button
             {
                 Text = text,
-                Width = 320,
-                Height = 40
+                Width = 330,
+                Height = 42,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(28, 28, 28),
+                ForeColor = TextCol
             };
+            b.FlatAppearance.BorderColor = Border;
+            b.FlatAppearance.BorderSize = 1;
             b.Click += onClick;
             return b;
         }
 
+        private static Button TitleButton(string text, EventHandler onClick)
+        {
+            var b = new Button
+            {
+                Text = text,
+                Width = 44,
+                Height = 44,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = PanelBg,
+                ForeColor = TextCol,
+                TabStop = false
+            };
+            b.FlatAppearance.BorderSize = 0;
+            b.Click += onClick;
+            return b;
+        }
+
+        private void HookEngine()
+        {
+            _engine.Log += UiLog;
+            _engine.Progress += UiProgress;
+        }
+
+        private void SetDefaults()
+        {
+            _year.Text = DateTime.Now.Year.ToString();
+            _genre.Text = "Unknown";
+            _albumArtist.Text = "Various Artists";
+        }
+
         private void SetButtonsEnabled(bool enabled)
         {
-            btnDownload.Enabled = enabled;
-            btnCue.Enabled = enabled;
-            btnCover.Enabled = enabled;
-            btnSave.Enabled = enabled;
-            btnBurn.Enabled = enabled;
-            btnOpenFolder.Enabled = enabled;
+            _btnDownload.Enabled = enabled;
+            _btnCue.Enabled = enabled;
+            _btnCover.Enabled = enabled;
+            _btnSave.Enabled = enabled;
+            _btnBurn.Enabled = enabled;
+            _btnOpenFolder.Enabled = enabled;
         }
 
         // =========================
         // Actions
         // =========================
-
         private async Task BuildProjectAsync()
         {
-            var title = txtAlbumTitle.Text.Trim();
+            var title = _albumTitle.Text.Trim();
             if (string.IsNullOrWhiteSpace(title))
             {
                 MessageBox.Show("Enter an Album Title.");
                 return;
             }
 
-            var urls = txtUrls.Lines.Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
+            var urls = _urls.Lines.Where(l => !string.IsNullOrWhiteSpace(l)).ToArray();
             if (urls.Length == 0)
             {
                 MessageBox.Show("Paste at least one YouTube URL.");
@@ -231,16 +346,16 @@ namespace DiskBurner
             }
 
             UiLog("Building project...");
-            progress.Value = 0;
+            _progress.Value = 0;
 
             ToggleUiBusy(true);
             try
             {
                 _project = await _engine.BuildProjectFromUrlsAsync(
-                    txtAlbumTitle.Text,
-                    txtAlbumArtist.Text,
-                    txtGenre.Text,
-                    txtYear.Text,
+                    _albumTitle.Text,
+                    _albumArtist.Text,
+                    _genre.Text,
+                    _year.Text,
                     urls);
 
                 UiLog($"Project ready. Tracks: {_project.Tracks.Count}");
@@ -265,7 +380,7 @@ namespace DiskBurner
                 return;
             }
 
-            progress.Value = 0;
+            _progress.Value = 0;
             ToggleUiBusy(true);
             try
             {
@@ -285,16 +400,9 @@ namespace DiskBurner
 
         private void GenerateCue()
         {
-            if (_project is null)
-            {
-                MessageBox.Show("Build the project first.");
-                return;
-            }
+            if (_project is null) { MessageBox.Show("Build the project first."); return; }
 
-            try
-            {
-                _engine.GenerateCue(_project);
-            }
+            try { _engine.GenerateCue(_project); }
             catch (Exception ex)
             {
                 UiLog("[!] CUE failed: " + ex.Message);
@@ -304,16 +412,9 @@ namespace DiskBurner
 
         private void GenerateCover()
         {
-            if (_project is null)
-            {
-                MessageBox.Show("Build the project first.");
-                return;
-            }
+            if (_project is null) { MessageBox.Show("Build the project first."); return; }
 
-            try
-            {
-                _engine.GenerateCoverHtml(_project);
-            }
+            try { _engine.GenerateCoverHtml(_project); }
             catch (Exception ex)
             {
                 UiLog("[!] Cover HTML failed: " + ex.Message);
@@ -323,39 +424,24 @@ namespace DiskBurner
 
         private async Task SaveProjectAsync()
         {
-            if (_project is null)
-            {
-                MessageBox.Show("Build the project first.");
-                return;
-            }
+            if (_project is null) { MessageBox.Show("Build the project first."); return; }
 
             ToggleUiBusy(true);
-            try
-            {
-                await _engine.SaveProjectAsync(_project);
-            }
+            try { await _engine.SaveProjectAsync(_project); }
             catch (Exception ex)
             {
                 UiLog("[!] Save failed: " + ex.Message);
                 MessageBox.Show(ex.ToString(), "Save failed");
             }
-            finally
-            {
-                ToggleUiBusy(false);
-            }
+            finally { ToggleUiBusy(false); }
         }
 
         private void Burn()
         {
-            if (_project is null)
-            {
-                MessageBox.Show("Build the project first.");
-                return;
-            }
+            if (_project is null) { MessageBox.Show("Build the project first."); return; }
 
             try
             {
-                // Ensure cue exists
                 if (string.IsNullOrWhiteSpace(_project.CuePath) || !File.Exists(_project.CuePath))
                 {
                     UiLog("CUE not found, generating...");
@@ -396,40 +482,45 @@ namespace DiskBurner
         // =========================
         // UI helpers
         // =========================
-
         private void ToggleUiBusy(bool busy)
         {
-            btnBuild.Enabled = !busy;
-            btnDownload.Enabled = !busy && _project != null;
-            btnCue.Enabled = !busy && _project != null;
-            btnCover.Enabled = !busy && _project != null;
-            btnSave.Enabled = !busy && _project != null;
-            btnBurn.Enabled = !busy && _project != null;
-            btnOpenFolder.Enabled = !busy && _project != null;
+            _btnBuild.Enabled = !busy;
+            _btnDownload.Enabled = !busy && _project != null;
+            _btnCue.Enabled = !busy && _project != null;
+            _btnCover.Enabled = !busy && _project != null;
+            _btnSave.Enabled = !busy && _project != null;
+            _btnBurn.Enabled = !busy && _project != null;
+            _btnOpenFolder.Enabled = !busy && _project != null;
 
             UseWaitCursor = busy;
         }
 
         private void UiLog(string msg)
         {
-            if (IsHandleCreated)
-            {
-                BeginInvoke(new Action(() =>
-                {
-                    txtLog.AppendText(msg + Environment.NewLine);
-                }));
-            }
+            if (!IsHandleCreated) return;
+            BeginInvoke(new Action(() => _log.AppendText(msg + Environment.NewLine)));
         }
 
         private void UiProgress(int p)
         {
-            if (IsHandleCreated)
+            if (!IsHandleCreated) return;
+            BeginInvoke(new Action(() =>
             {
-                BeginInvoke(new Action(() =>
-                {
-                    progress.Value = Math.Max(0, Math.Min(100, p));
-                }));
-            }
+                _progress.Value = Math.Max(0, Math.Min(100, p));
+            }));
         }
+
+        // =========================
+        // Title bar actions
+        // =========================
+        private void TitleBar_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left) return;
+            ReleaseCapture();
+            SendMessage(this.Handle, 0x112, 0xF012, 0);
+        }
+
+        private void BtnClose_Click(object? sender, EventArgs e) => Close();
+        private void BtnMin_Click(object? sender, EventArgs e) => WindowState = FormWindowState.Minimized;
     }
 }
