@@ -54,6 +54,9 @@ public sealed class AlbumEngine
     // WinForms can subscribe to these
     public event Action<string>? Log;
     public event Action<int>? Progress; // 0..100 (overall per-track progress)
+    public event Action<int>? TrackProgress;     // 0..100 for current track
+    public event Action<string>? Status;         // short UI status line
+    public event Action<TimeSpan>? TotalDurationChanged; // album total when known
 
     public async Task<AlbumProject> BuildProjectFromUrlsAsync(
         string albumTitle,
@@ -184,7 +187,9 @@ public sealed class AlbumEngine
             t.SourceFile = Path.Combine(project.OutputDir, $"{t.TrackNumber:D2}_temp.{ext}");
 
             Log?.Invoke("Downloading audio…");
-            await _youtube.Videos.Streams.DownloadAsync(audio, t.SourceFile);
+
+
+
             Log?.Invoke("Download complete.");
 
             Log?.Invoke("Converting to WAV (44.1kHz, 16-bit, stereo)…");
@@ -319,6 +324,20 @@ public sealed class AlbumEngine
     {
         try { if (File.Exists(path)) File.Delete(path); } catch { /* ignore */ }
     }
+    private void RaiseTotalDuration(AlbumProject project)
+    {
+        var total = TimeSpan.FromSeconds(
+            project.Tracks.Where(t => t.Duration.HasValue)
+                          .Sum(t => t.Duration!.Value.TotalSeconds));
+
+        TotalDurationChanged?.Invoke(total);
+
+        if (total.TotalMinutes > 80)
+            Log?.Invoke($"⚠ WARNING: Total time {Fmt.Duration(total)} exceeds 80:00 CD limit.");
+        else
+            Log?.Invoke($"Total time: {Fmt.Duration(total)}");
+    }
+
 }
 
 // ========= Helpers (small + focused) =========

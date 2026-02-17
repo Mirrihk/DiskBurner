@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Windows.Forms;
-using static System.Windows.Forms.DataFormats;
 
 namespace DiskBurner
 {
@@ -10,7 +9,7 @@ namespace DiskBurner
         static void Main()
         {
             ApplicationConfiguration.Initialize();
-            Application.Run(new DiskBurner());
+            Application.Run(new DiskBurnerForm());
         }
     }
 }
