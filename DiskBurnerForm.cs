@@ -277,6 +277,13 @@ namespace DiskBurner
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
+        private void RecalculateTrackNumbers(List<TrackInfo> tracks)
+        {
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                tracks[i].TrackNumber = i + 1;
+            }
+        }
 
         private void DiskBurnerForm_Load(object sender, EventArgs e)
         {
@@ -286,10 +293,10 @@ namespace DiskBurner
         {
             using var form = new Form
             {
-                Text = "Edit Track Metadata",
+                Text = "Edit & Arrange Tracks",
                 StartPosition = FormStartPosition.CenterParent,
-                Width = 900,
-                Height = 500
+                Width = 1000,
+                Height = 550
             };
 
             var grid = new DataGridView
@@ -299,7 +306,8 @@ namespace DiskBurner
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 RowHeadersVisible = false,
-                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false
             };
 
             // Columns
@@ -315,42 +323,89 @@ namespace DiskBurner
             {
                 HeaderText = "Artist",
                 DataPropertyName = nameof(TrackInfo.Artist),
-                Width = 260
+                Width = 300
             });
 
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
                 HeaderText = "Title",
                 DataPropertyName = nameof(TrackInfo.Title),
-                Width = 450
+                Width = 500
             });
 
-            // Bind
             var list = project.Tracks.OrderBy(t => t.TrackNumber).ToList();
-            grid.DataSource = new BindingSource { DataSource = list };
+            var binding = new BindingSource { DataSource = list };
+            grid.DataSource = binding;
 
-            // Font that supports Japanese
-            try
+            // Japanese-safe font
+            try { grid.Font = new Font("Yu Gothic UI", 10F); } catch { }
+
+            // Buttons panel
+            var panel = new Panel { Dock = DockStyle.Bottom, Height = 50 };
+
+            var btnUp = new Button { Text = "↑ Up", Left = 10, Top = 10, Width = 80 };
+            var btnDown = new Button { Text = "↓ Down", Left = 100, Top = 10, Width = 80 };
+            var btnOk = new Button { Text = "OK", Left = 780, Top = 10, Width = 90, DialogResult = DialogResult.OK };
+            var btnCancel = new Button { Text = "Cancel", Left = 880, Top = 10, Width = 90, DialogResult = DialogResult.Cancel };
+
+            panel.Controls.Add(btnUp);
+            panel.Controls.Add(btnDown);
+            panel.Controls.Add(btnOk);
+            panel.Controls.Add(btnCancel);
+
+            // ===== MOVE UP =====
+            btnUp.Click += (s, e) =>
             {
-                grid.Font = new Font("Yu Gothic UI", 10F);
-            }
-            catch { /* ignore */ }
+                if (grid.CurrentRow == null) return;
 
-            var pnl = new Panel { Dock = DockStyle.Bottom, Height = 45 };
-            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 680, Top = 8, Width = 90 };
-            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 780, Top = 8, Width = 90 };
+                int index = grid.CurrentRow.Index;
+                if (index <= 0) return;
 
-            pnl.Controls.Add(btnOk);
-            pnl.Controls.Add(btnCancel);
+                var item = list[index];
+                list.RemoveAt(index);
+                list.Insert(index - 1, item);
+
+                RecalculateTrackNumbers(list);
+
+                binding.ResetBindings(false);
+                grid.CurrentCell = grid.Rows[index - 1].Cells[1];
+            };
+
+            // ===== MOVE DOWN =====
+            btnDown.Click += (s, e) =>
+            {
+                if (grid.CurrentRow == null) return;
+
+                int index = grid.CurrentRow.Index;
+                if (index >= list.Count - 1) return;
+
+                var item = list[index];
+                list.RemoveAt(index);
+                list.Insert(index + 1, item);
+
+                RecalculateTrackNumbers(list);
+
+                binding.ResetBindings(false);
+                grid.CurrentCell = grid.Rows[index + 1].Cells[1];
+            };
 
             form.Controls.Add(grid);
-            form.Controls.Add(pnl);
+            form.Controls.Add(panel);
 
             form.AcceptButton = btnOk;
             form.CancelButton = btnCancel;
 
-            return form.ShowDialog(this) == DialogResult.OK;
+            var result = form.ShowDialog(this) == DialogResult.OK;
+
+            if (result)
+            {
+                // Write reordered list back to project
+                project.Tracks = list;
+            }
+
+            return result;
         }
+
 
 
     }
