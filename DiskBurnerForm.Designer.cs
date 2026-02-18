@@ -292,6 +292,7 @@ namespace DiskBurner
             Margin = new Padding(3, 4, 3, 4);
             Name = "DiskBurnerForm";
             Text = "DiskBurner";
+            Load += DiskBurnerForm_Load;
             ((System.ComponentModel.ISupportInitialize)picCover).EndInit();
             ResumeLayout(false);
             PerformLayout();

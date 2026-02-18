@@ -23,6 +23,16 @@ namespace DiskBurner
         {
             InitializeComponent();
 
+            var uiFont = new Font("Yu Gothic UI", 9F);
+            txtAlbumTitle.Font = uiFont;
+            txtAlbumArtist.Font = uiFont;
+            txtGenre.Font = uiFont;
+            txtYear.Font = uiFont;
+            txtUrls.Font = uiFont;
+            txtLog.Font = uiFont;
+            // (optional) form font too:
+            this.Font = uiFont;
+
             // Dark theme
             BackColor = Color.FromArgb(30, 30, 30);
             ForeColor = Color.White;
@@ -110,6 +120,12 @@ namespace DiskBurner
                 await _engine.SaveProjectAsync(project);
 
                 MessageBox.Show("Album build complete!", "Done");
+
+                if (!EditTracksDialog(project))
+                {
+                    AppendLog("Edit cancelled. Build aborted.");
+                    return;
+                }
 
                 if (MessageBox.Show("Burn CD now?", "Burn",
                         MessageBoxButtons.YesNo) == DialogResult.Yes)
@@ -261,5 +277,81 @@ namespace DiskBurner
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
+
+        private void DiskBurnerForm_Load(object sender, EventArgs e)
+        {
+
+        }
+        private bool EditTracksDialog(AlbumProject project)
+        {
+            using var form = new Form
+            {
+                Text = "Edit Track Metadata",
+                StartPosition = FormStartPosition.CenterParent,
+                Width = 900,
+                Height = 500
+            };
+
+            var grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AutoGenerateColumns = false,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                RowHeadersVisible = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect
+            };
+
+            // Columns
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "#",
+                DataPropertyName = nameof(TrackInfo.TrackNumber),
+                Width = 50,
+                ReadOnly = true
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Artist",
+                DataPropertyName = nameof(TrackInfo.Artist),
+                Width = 260
+            });
+
+            grid.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Title",
+                DataPropertyName = nameof(TrackInfo.Title),
+                Width = 450
+            });
+
+            // Bind
+            var list = project.Tracks.OrderBy(t => t.TrackNumber).ToList();
+            grid.DataSource = new BindingSource { DataSource = list };
+
+            // Font that supports Japanese
+            try
+            {
+                grid.Font = new Font("Yu Gothic UI", 10F);
+            }
+            catch { /* ignore */ }
+
+            var pnl = new Panel { Dock = DockStyle.Bottom, Height = 45 };
+            var btnOk = new Button { Text = "OK", DialogResult = DialogResult.OK, Left = 680, Top = 8, Width = 90 };
+            var btnCancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Left = 780, Top = 8, Width = 90 };
+
+            pnl.Controls.Add(btnOk);
+            pnl.Controls.Add(btnCancel);
+
+            form.Controls.Add(grid);
+            form.Controls.Add(pnl);
+
+            form.AcceptButton = btnOk;
+            form.CancelButton = btnCancel;
+
+            return form.ShowDialog(this) == DialogResult.OK;
+        }
+
+
     }
 }
