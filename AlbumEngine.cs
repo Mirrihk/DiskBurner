@@ -280,6 +280,11 @@ public sealed class AlbumEngine
 
     public void GenerateCue(AlbumProject project)
     {
+        var bad = project.Tracks.Where(t => string.IsNullOrWhiteSpace(t.WavFile) || !File.Exists(t.WavFile)).ToList();
+        if (bad.Count > 0)
+            throw new InvalidOperationException("GenerateCue called before WAVs are ready. Example: " +
+                                                $"Track {bad[0].TrackNumber} WavFile='{bad[0].WavFile}'");
+
         if (string.IsNullOrWhiteSpace(project.CuePath))
             project.CuePath = Path.Combine(project.OutputDir, FileName.Safe(project.AlbumTitle) + ".cue");
 
