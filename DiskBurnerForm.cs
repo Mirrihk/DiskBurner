@@ -96,6 +96,7 @@ namespace DiskBurner
         {
             btnBuild.Enabled = false;
             btnBuildMp3List.Enabled = false;
+            btnBrowseCover.Enabled = false;
             btnBurn.Enabled = false;
             progressBar1.Value = 0;
             progressTrack.Value = 0;
@@ -117,6 +118,7 @@ namespace DiskBurner
                     _cts.Token
                 );
 
+                AttachSelectedCover(project);
                 _project = project;
 
                 // 2) Download + convert (creates WAVs + sets WavFile paths)
@@ -159,6 +161,7 @@ namespace DiskBurner
             {
                 btnBuild.Enabled = true;
                 btnBuildMp3List.Enabled = true;
+                btnBrowseCover.Enabled = true;
                 _cts = null;
             }
         }
@@ -170,6 +173,7 @@ namespace DiskBurner
         {
             btnBuild.Enabled = false;
             btnBuildMp3List.Enabled = false;
+            btnBrowseCover.Enabled = false;
             btnBurn.Enabled = false;
             progressBar1.Value = 0;
             progressTrack.Value = 0;
@@ -198,6 +202,7 @@ namespace DiskBurner
                     return;
                 }
 
+                AttachSelectedCover(project);
                 var safeAlbumTitle = SafeFileName(project.AlbumTitle);
                 project.PlaylistPath = Path.Combine(project.OutputDir, $"{safeAlbumTitle}.m3u");
                 project.ProjectPath = Path.Combine(project.OutputDir, $"{safeAlbumTitle}.mp3.project.json");
@@ -229,6 +234,7 @@ namespace DiskBurner
             {
                 btnBuild.Enabled = true;
                 btnBuildMp3List.Enabled = true;
+                btnBrowseCover.Enabled = true;
                 btnBurn.Enabled = _project != null &&
                     _project.Tracks.Count > 0 &&
                     _project.Tracks.All(t => !string.IsNullOrWhiteSpace(t.WavFile) && File.Exists(t.WavFile));
@@ -271,34 +277,62 @@ namespace DiskBurner
         {
             using var dlg = new OpenFileDialog
             {
-                Title = "Select Album Cover",
-                Filter = "Image Files|*.jpg;*.jpeg;*.png;*.bmp;*.webp"
+                Title = "Select Playlist / Album Cover",
+                Filter = "Image Files|*.jpg;*.jpeg;*.png;*.bmp"
             };
 
-            if (dlg.ShowDialog() == DialogResult.OK)
+            if (dlg.ShowDialog() != DialogResult.OK)
+                return;
+
+            try
             {
-                using var temp = Image.FromFile(dlg.FileName);
-                picCover.Image = new Bitmap(temp);
+                using var image = Image.FromFile(dlg.FileName);
+                var previous = picCover.Image;
+                picCover.Image = new Bitmap(image);
+                previous?.Dispose();
+
+                AppendLog("Shared cover selected. It will be embedded into every MP3 on the next export.");
 
                 if (_project != null)
                 {
-                    var dest = Path.Combine(_project.OutputDir, Path.GetFileName(dlg.FileName));
-                    File.Copy(dlg.FileName, dest, true);
-                    _project.CoverImagePath = dest;
-
-                    AppendLog($"Cover set: {dest}");
-
-                    // Regenerate cover HTML if already built
-                    try
-                    {
-                        _engine.GenerateCoverHtml(_project);
-                    }
-                    catch { /* ignore */ }
+                    AttachSelectedCover(_project);
+                    _engine.GenerateCoverHtml(_project);
                 }
-                else
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Cover image failed");
+            }
+        }
+
+        private void AttachSelectedCover(AlbumProject project)
+        {
+            if (picCover.Image == null)
+                return;
+
+            Directory.CreateDirectory(project.OutputDir);
+            var destination = Path.Combine(project.OutputDir, "cover.jpg");
+            var temporary = Path.Combine(project.OutputDir, $".cover-{Guid.NewGuid():N}.jpg");
+
+            try
+            {
+                // Flatten transparent images onto white and store one portable JPEG.
+                using var cover = new Bitmap(picCover.Image.Width, picCover.Image.Height);
+                using (var graphics = Graphics.FromImage(cover))
                 {
-                    AppendLog("Cover selected (build album first to attach it).");
+                    graphics.Clear(Color.White);
+                    graphics.DrawImage(picCover.Image, 0, 0, cover.Width, cover.Height);
                 }
+
+                cover.Save(temporary, System.Drawing.Imaging.ImageFormat.Jpeg);
+                File.Move(temporary, destination, overwrite: true);
+                project.CoverImagePath = destination;
+                AppendLog($"Shared cover saved: {destination}");
+            }
+            finally
+            {
+                if (File.Exists(temporary))
+                    File.Delete(temporary);
             }
         }
 
