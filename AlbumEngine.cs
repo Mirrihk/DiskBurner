@@ -291,6 +291,9 @@ public sealed class AlbumEngine
             return;
         }
 
+        if (!string.IsNullOrWhiteSpace(project.CoverImagePath) && !File.Exists(project.CoverImagePath))
+            throw new FileNotFoundException("The selected playlist cover could not be found.", project.CoverImagePath);
+
         Directory.CreateDirectory(project.OutputDir);
 
         int total = project.Tracks.Count;
@@ -339,12 +342,32 @@ public sealed class AlbumEngine
                 ct.ThrowIfCancellationRequested();
 
                 Status?.Invoke("Encoding MP3…");
-                var ffmpegArguments = new[]
+                var ffmpegArguments = new List<string>
                 {
                     "-y",
-                    "-i", t.SourceFile,
-                    "-map", "0:a:0",
-                    "-vn",
+                    "-i", t.SourceFile
+                };
+
+                if (!string.IsNullOrWhiteSpace(project.CoverImagePath))
+                {
+                    ffmpegArguments.AddRange(new[]
+                    {
+                        "-i", project.CoverImagePath,
+                        "-map", "0:a:0",
+                        "-map", "1:v:0",
+                        "-codec:v", "mjpeg",
+                        "-disposition:v:0", "attached_pic",
+                        "-metadata:s:v:0", "title=Album cover",
+                        "-metadata:s:v:0", "comment=Cover (front)"
+                    });
+                }
+                else
+                {
+                    ffmpegArguments.AddRange(new[] { "-map", "0:a:0", "-vn" });
+                }
+
+                ffmpegArguments.AddRange(new[]
+                {
                     "-codec:a", "libmp3lame",
                     "-b:a", "320k",
                     "-id3v2_version", "3",
@@ -356,7 +379,7 @@ public sealed class AlbumEngine
                     "-metadata", $"date={project.Year}",
                     "-metadata", $"track={t.TrackNumber}/{total}",
                     t.Mp3File
-                };
+                });
 
                 var conversion = await Proc.RunAsync(FfmpegPath, ffmpegArguments, ct);
                 if (!conversion.Ok)
