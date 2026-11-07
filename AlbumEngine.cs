@@ -25,6 +25,7 @@ public sealed class TrackInfo
 
     public string SourceFile { get; set; } = ""; // temp download
     public string WavFile { get; set; } = "";    // 44.1k/16-bit stereo
+    public string Mp3File { get; set; } = "";
     public TimeSpan? Duration { get; set; }
 }
 
@@ -41,6 +42,7 @@ public sealed class AlbumProject
     public string CuePath { get; set; } = "";
     public string ProjectPath { get; set; } = "";
     public string CoverImagePath { get; set; } = "";
+    public string PlaylistPath { get; set; } = "";
 }
 
 // ========= Engine =========
@@ -278,6 +280,175 @@ public sealed class AlbumEngine
         Status?.Invoke("All tracks ready");
     }
 
+    public async Task DownloadAndConvertAllToMp3Async(AlbumProject project, CancellationToken ct = default)
+    {
+        ValidateToolPaths();
+
+        if (project.Tracks.Count == 0)
+        {
+            LogMessage?.Invoke("No tracks in project.");
+            Progress?.Invoke(0);
+            return;
+        }
+
+        Directory.CreateDirectory(project.OutputDir);
+
+        int total = project.Tracks.Count;
+        int done = 0;
+
+        foreach (var t in project.Tracks.OrderBy(x => x.TrackNumber))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            Status?.Invoke($"MP3: Track {t.TrackNumber:D2}: {t.Title}");
+            TrackProgress?.Invoke(0);
+            LogMessage?.Invoke($"=== MP3 Track {t.TrackNumber:D2}: {t.Artist} — {t.Title} ===");
+
+            t.Mp3File = Path.Combine(project.OutputDir,
+                $"{t.TrackNumber:D2} - {FileName.Safe(t.Artist)} - {FileName.Safe(t.Title)}.mp3");
+            t.SourceFile = "";
+
+            try
+            {
+                SafeDelete(t.Mp3File);
+
+                Status?.Invoke("Fetching audio stream…");
+                var manifest = await _youtube.Videos.Streams.GetManifestAsync(t.Url, ct);
+                var audio = manifest.GetAudioOnlyStreams().GetWithHighestBitrate();
+
+                if (audio is null)
+                    throw new InvalidOperationException("No audio-only stream was found.");
+
+                var ext = audio.Container.Name;
+                t.SourceFile = Path.Combine(project.OutputDir, $"{t.TrackNumber:D2}_mp3_temp.{ext}");
+                SafeDelete(t.SourceFile);
+
+                Status?.Invoke("Downloading audio…");
+                var downloadProgress = new Progress<double>(fraction =>
+                {
+                    var percent = (int)Math.Round(Math.Clamp(fraction, 0d, 1d) * 50d);
+                    TrackProgress?.Invoke(10 + percent);
+                });
+
+                await _youtube.Videos.Streams.DownloadAsync(
+                    audio,
+                    t.SourceFile,
+                    progress: downloadProgress,
+                    cancellationToken: ct);
+
+                ct.ThrowIfCancellationRequested();
+
+                Status?.Invoke("Encoding MP3…");
+                var ffmpegArguments = new[]
+                {
+                    "-y",
+                    "-i", t.SourceFile,
+                    "-map", "0:a:0",
+                    "-vn",
+                    "-codec:a", "libmp3lame",
+                    "-b:a", "320k",
+                    "-id3v2_version", "3",
+                    "-metadata", $"title={t.Title}",
+                    "-metadata", $"artist={t.Artist}",
+                    "-metadata", $"album={project.AlbumTitle}",
+                    "-metadata", $"album_artist={project.AlbumArtist}",
+                    "-metadata", $"genre={project.Genre}",
+                    "-metadata", $"date={project.Year}",
+                    "-metadata", $"track={t.TrackNumber}/{total}",
+                    t.Mp3File
+                };
+
+                var conversion = await Proc.RunAsync(FfmpegPath, ffmpegArguments, ct);
+                if (!conversion.Ok)
+                    throw new InvalidOperationException("FFmpeg MP3 conversion failed:\n" + conversion.Output);
+
+                if (!File.Exists(t.Mp3File))
+                    throw new InvalidOperationException("FFmpeg reported success but did not create the MP3 file.");
+
+                var ffprobePath = Path.Combine(Path.GetDirectoryName(FfmpegPath) ?? "", "ffprobe.exe");
+                if (File.Exists(ffprobePath))
+                {
+                    var probe = await Proc.RunAsync(
+                        ffprobePath,
+                        new[]
+                        {
+                            "-v", "error",
+                            "-show_entries", "format=duration",
+                            "-of", "default=noprint_wrappers=1:nokey=1",
+                            t.Mp3File
+                        },
+                        ct);
+
+                    if (probe.Ok &&
+                        double.TryParse(probe.Output.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var seconds))
+                    {
+                        t.Duration = TimeSpan.FromSeconds(seconds);
+                    }
+                }
+
+                TrackProgress?.Invoke(100);
+                LogMessage?.Invoke($"MP3 created: {Path.GetFileName(t.Mp3File)}");
+            }
+            catch (OperationCanceledException)
+            {
+                SafeDelete(t.SourceFile);
+                SafeDelete(t.Mp3File);
+                t.Mp3File = "";
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SafeDelete(t.Mp3File);
+                t.Mp3File = "";
+                LogMessage?.Invoke($"[!] MP3 failed for track {t.TrackNumber:D2}: {ex.Message}");
+            }
+            finally
+            {
+                SafeDelete(t.SourceFile);
+            }
+
+            done++;
+            Progress?.Invoke(done * 100 / total);
+            RaiseTotalDuration(project);
+        }
+
+        Status?.Invoke("MP3 tracks ready");
+    }
+
+    public string GenerateMp3Playlist(AlbumProject project)
+    {
+        var tracks = project.Tracks
+            .OrderBy(t => t.TrackNumber)
+            .Where(t => !string.IsNullOrWhiteSpace(t.Mp3File) && File.Exists(t.Mp3File))
+            .ToList();
+
+        if (tracks.Count == 0)
+            throw new InvalidOperationException("No MP3 files were created, so a playlist could not be written.");
+
+        if (string.IsNullOrWhiteSpace(project.PlaylistPath))
+            project.PlaylistPath = Path.Combine(project.OutputDir, FileName.Safe(project.AlbumTitle) + ".m3u");
+
+        var playlist = new StringBuilder();
+        playlist.AppendLine("#EXTM3U");
+
+        foreach (var track in tracks)
+        {
+            var durationSeconds = track.Duration.HasValue
+                ? (int)Math.Max(0, Math.Round(track.Duration.Value.TotalSeconds))
+                : -1;
+            var displayName = $"{track.Artist} - {track.Title}"
+                .Replace('\r', ' ')
+                .Replace('\n', ' ');
+
+            playlist.AppendLine($"#EXTINF:{durationSeconds},{displayName}");
+            playlist.AppendLine(Path.GetFileName(track.Mp3File));
+        }
+
+        File.WriteAllText(project.PlaylistPath, playlist.ToString(), new UTF8Encoding(false));
+        LogMessage?.Invoke($"MP3 playlist written: {project.PlaylistPath}");
+        return project.PlaylistPath;
+    }
+
     public void GenerateCue(AlbumProject project)
     {
         var bad = project.Tracks.Where(t => string.IsNullOrWhiteSpace(t.WavFile) || !File.Exists(t.WavFile)).ToList();
@@ -446,6 +617,53 @@ file static class Fmt
 
 file static class Proc
 {
+    public static async Task<(bool Ok, string Output)> RunAsync(
+        string exe,
+        IEnumerable<string> arguments,
+        CancellationToken ct = default)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = exe,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        foreach (var argument in arguments)
+            psi.ArgumentList.Add(argument);
+
+        using var process = new Process { StartInfo = psi };
+        process.Start();
+
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+
+        try
+        {
+            await process.WaitForExitAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch { /* process may have exited already */ }
+
+            try { await process.WaitForExitAsync(CancellationToken.None); } catch { }
+            await Task.WhenAll(stderrTask, stdoutTask);
+            throw;
+        }
+
+        var stderr = await stderrTask;
+        var stdout = await stdoutTask;
+        var output = (stderr + Environment.NewLine + stdout).Trim();
+        return (process.ExitCode == 0, output);
+    }
+
     public static (bool Ok, string Output) Run(string exe, string args, bool redirectStdOut = false)
     {
         try

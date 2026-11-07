@@ -45,6 +45,10 @@ namespace DiskBurner
             btnBuild.ForeColor = Color.White;
             btnBuild.FlatStyle = FlatStyle.Flat;
 
+            btnBuildMp3List.BackColor = Color.FromArgb(70, 70, 70);
+            btnBuildMp3List.ForeColor = Color.White;
+            btnBuildMp3List.FlatStyle = FlatStyle.Flat;
+
             // ===== ENGINE EVENTS =====
             _engine.LogMessage += msg =>
             {
@@ -91,6 +95,7 @@ namespace DiskBurner
         private async void btnBuild_Click(object sender, EventArgs e)
         {
             btnBuild.Enabled = false;
+            btnBuildMp3List.Enabled = false;
             btnBurn.Enabled = false;
             progressBar1.Value = 0;
             progressTrack.Value = 0;
@@ -153,6 +158,80 @@ namespace DiskBurner
             finally
             {
                 btnBuild.Enabled = true;
+                btnBuildMp3List.Enabled = true;
+                _cts = null;
+            }
+        }
+
+        // ===========================
+        // BUILD MP3 FILES + PLAYLIST
+        // ===========================
+        private async void btnBuildMp3List_Click(object sender, EventArgs e)
+        {
+            btnBuild.Enabled = false;
+            btnBuildMp3List.Enabled = false;
+            btnBurn.Enabled = false;
+            progressBar1.Value = 0;
+            progressTrack.Value = 0;
+
+            _cts = new CancellationTokenSource();
+
+            try
+            {
+                var project = await _engine.BuildProjectFromUrlsAsync(
+                    txtAlbumTitle.Text,
+                    txtAlbumArtist.Text,
+                    txtGenre.Text,
+                    txtYear.Text,
+                    txtUrls.Lines,
+                    string.IsNullOrWhiteSpace(_outputFolder) ? null : _outputFolder,
+                    _cts.Token
+                );
+
+                if (project.Tracks.Count == 0)
+                    throw new InvalidOperationException("No valid YouTube tracks were found in the URL list.");
+
+                // Edit the order and metadata before filenames, tags, and playlist are created.
+                if (!EditTracksDialog(project))
+                {
+                    AppendLog("MP3 playlist creation cancelled.");
+                    return;
+                }
+
+                var safeAlbumTitle = SafeFileName(project.AlbumTitle);
+                project.PlaylistPath = Path.Combine(project.OutputDir, $"{safeAlbumTitle}.m3u");
+                project.ProjectPath = Path.Combine(project.OutputDir, $"{safeAlbumTitle}.mp3.project.json");
+
+                await _engine.DownloadAndConvertAllToMp3Async(project, _cts.Token);
+
+                var playlistPath = _engine.GenerateMp3Playlist(project);
+                await _engine.SaveProjectAsync(project, _cts.Token);
+
+                var createdCount = project.Tracks.Count(t =>
+                    !string.IsNullOrWhiteSpace(t.Mp3File) && File.Exists(t.Mp3File));
+
+                AppendLog($"Created {createdCount} of {project.Tracks.Count} MP3 file(s).");
+                MessageBox.Show(
+                    $"Created {createdCount} of {project.Tracks.Count} MP3 file(s).\n\nPlaylist:\n{playlistPath}",
+                    "MP3 List Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                AppendLog("MP3 export cancelled.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "MP3 export failed");
+            }
+            finally
+            {
+                btnBuild.Enabled = true;
+                btnBuildMp3List.Enabled = true;
+                btnBurn.Enabled = _project != null &&
+                    _project.Tracks.Count > 0 &&
+                    _project.Tracks.All(t => !string.IsNullOrWhiteSpace(t.WavFile) && File.Exists(t.WavFile));
                 _cts = null;
             }
         }
