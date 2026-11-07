@@ -96,6 +96,7 @@ namespace DiskBurner
         {
             btnBuild.Enabled = false;
             btnBuildMp3List.Enabled = false;
+            btnShareVideo.Enabled = false;
             btnBrowseCover.Enabled = false;
             btnBurn.Enabled = false;
             progressBar1.Value = 0;
@@ -161,6 +162,7 @@ namespace DiskBurner
             {
                 btnBuild.Enabled = true;
                 btnBuildMp3List.Enabled = true;
+                btnShareVideo.Enabled = true;
                 btnBrowseCover.Enabled = true;
                 _cts = null;
             }
@@ -173,6 +175,7 @@ namespace DiskBurner
         {
             btnBuild.Enabled = false;
             btnBuildMp3List.Enabled = false;
+            btnShareVideo.Enabled = false;
             btnBrowseCover.Enabled = false;
             btnBurn.Enabled = false;
             progressBar1.Value = 0;
@@ -234,6 +237,7 @@ namespace DiskBurner
             {
                 btnBuild.Enabled = true;
                 btnBuildMp3List.Enabled = true;
+                btnShareVideo.Enabled = true;
                 btnBrowseCover.Enabled = true;
                 btnBurn.Enabled = _project != null &&
                     _project.Tracks.Count > 0 &&
@@ -245,6 +249,91 @@ namespace DiskBurner
         // ===========================
         // CANCEL
         // ===========================
+        private async void btnShareVideo_Click(object sender, EventArgs e)
+        {
+            using var playlist = new OpenFileDialog
+            {
+                Title = "Select your exported playlist",
+                Filter = "MP3 Playlist|*.m3u;*.m3u8",
+                InitialDirectory = Directory.Exists(_outputFolder) ? _outputFolder :
+                    Path.Combine(Environment.CurrentDirectory, SafeFileName(txtAlbumTitle.Text))
+            };
+            if (playlist.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            var folder = Path.GetDirectoryName(playlist.FileName)!;
+            var cover = Path.Combine(folder, "cover.jpg");
+            if (!File.Exists(cover))
+            {
+                using var image = new OpenFileDialog
+                {
+                    Title = "Choose the cover shown throughout the video",
+                    Filter = "Cover Image|*.jpg;*.jpeg;*.png;*.bmp",
+                    InitialDirectory = folder
+                };
+                if (image.ShowDialog(this) != DialogResult.OK)
+                    return;
+                cover = image.FileName;
+            }
+
+            using var destination = new SaveFileDialog
+            {
+                Title = "Save the video to send",
+                Filter = "MP4 Video|*.mp4",
+                DefaultExt = "mp4",
+                AddExtension = true,
+                InitialDirectory = folder,
+                FileName = Path.GetFileNameWithoutExtension(playlist.FileName) + " - Share.mp4"
+            };
+            if (destination.ShowDialog(this) != DialogResult.OK)
+                return;
+
+            using var cancellation = new CancellationTokenSource();
+            _cts = cancellation;
+            btnBuild.Enabled = false;
+            btnBuildMp3List.Enabled = false;
+            btnShareVideo.Enabled = false;
+            btnBurn.Enabled = false;
+            btnBrowseCover.Enabled = false;
+            btnOutputFolder.Enabled = false;
+            progressBar1.Style = ProgressBarStyle.Marquee;
+
+            try
+            {
+                await _engine.CreatePlaylistVideoAsync(
+                    playlist.FileName, cover, destination.FileName, cancellation.Token);
+                MessageBox.Show(this,
+                    $"Your share video is ready!\n\n{destination.FileName}\n\nSend this MP4. Open it and press Play to hear the whole playlist with the cover on screen.",
+                    "Share Video Ready", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{destination.FileName}\"",
+                    UseShellExecute = true
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                AppendLog("Share video cancelled.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Share video failed");
+            }
+            finally
+            {
+                progressBar1.Style = ProgressBarStyle.Blocks;
+                btnBuild.Enabled = true;
+                btnBuildMp3List.Enabled = true;
+                btnShareVideo.Enabled = true;
+                btnBrowseCover.Enabled = true;
+                btnOutputFolder.Enabled = true;
+                btnBurn.Enabled = _project != null && _project.Tracks.Count > 0 &&
+                    _project.Tracks.All(t => !string.IsNullOrWhiteSpace(t.WavFile) && File.Exists(t.WavFile));
+                _cts = null;
+            }
+        }
+
         private void btnCancel_Click(object sender, EventArgs e)
         {
             _cts?.Cancel();
