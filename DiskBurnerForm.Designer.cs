@@ -23,6 +23,7 @@ namespace DiskBurner
         private ProgressBar progressTrack;
 
         private Button btnBuild;
+        private Button btnBuildMp3List;
         private Button btnCancel;
         private Button btnOutputFolder;
         private Button btnBurn;
@@ -51,6 +52,7 @@ namespace DiskBurner
             txtLog = new RichTextBox();
             progressBar1 = new ProgressBar();
             btnBuild = new Button();
+            btnBuildMp3List = new Button();
             lblTitle = new Label();
             lblArtist = new Label();
             lblGenre = new Label();
@@ -145,6 +147,17 @@ namespace DiskBurner
             btnBuild.UseVisualStyleBackColor = true;
             btnBuild.Click += btnBuild_Click;
             // 
+            // btnBuildMp3List
+            // 
+            btnBuildMp3List.ForeColor = SystemColors.ActiveCaptionText;
+            btnBuildMp3List.Location = new Point(14, 479);
+            btnBuildMp3List.Name = "btnBuildMp3List";
+            btnBuildMp3List.Size = new Size(126, 29);
+            btnBuildMp3List.TabIndex = 20;
+            btnBuildMp3List.Text = "Build MP3 List";
+            btnBuildMp3List.UseVisualStyleBackColor = true;
+            btnBuildMp3List.Click += btnBuildMp3List_Click;
+            // 
             // lblTitle
             // 
             lblTitle.AutoSize = true;
@@ -211,9 +224,9 @@ namespace DiskBurner
             // btnCancel
             // 
             btnCancel.ForeColor = SystemColors.ActiveCaptionText;
-            btnCancel.Location = new Point(14, 606);
+            btnCancel.Location = new Point(14, 616);
             btnCancel.Name = "btnCancel";
-            btnCancel.Size = new Size(126, 46);
+            btnCancel.Size = new Size(126, 36);
             btnCancel.TabIndex = 15;
             btnCancel.Text = "Cancel";
             btnCancel.UseVisualStyleBackColor = true;
@@ -222,7 +235,7 @@ namespace DiskBurner
             // btnOutputFolder
             // 
             btnOutputFolder.ForeColor = SystemColors.ActiveCaptionText;
-            btnOutputFolder.Location = new Point(14, 514);
+            btnOutputFolder.Location = new Point(14, 549);
             btnOutputFolder.Name = "btnOutputFolder";
             btnOutputFolder.Size = new Size(126, 29);
             btnOutputFolder.TabIndex = 16;
@@ -243,7 +256,7 @@ namespace DiskBurner
             // btnBrowseCover
             // 
             btnBrowseCover.ForeColor = SystemColors.ActiveCaptionText;
-            btnBrowseCover.Location = new Point(14, 479);
+            btnBrowseCover.Location = new Point(14, 514);
             btnBrowseCover.Name = "btnBrowseCover";
             btnBrowseCover.Size = new Size(126, 29);
             btnBrowseCover.TabIndex = 18;
@@ -254,7 +267,7 @@ namespace DiskBurner
             // btnBurn
             // 
             btnBurn.ForeColor = SystemColors.ActiveCaptionText;
-            btnBurn.Location = new Point(14, 549);
+            btnBurn.Location = new Point(14, 584);
             btnBurn.Name = "btnBurn";
             btnBurn.Size = new Size(126, 29);
             btnBurn.TabIndex = 19;
@@ -269,6 +282,7 @@ namespace DiskBurner
             BackColor = SystemColors.ActiveCaptionText;
             ClientSize = new Size(914, 663);
             Controls.Add(btnBurn);
+            Controls.Add(btnBuildMp3List);
             Controls.Add(btnBrowseCover);
             Controls.Add(picCover);
             Controls.Add(btnOutputFolder);
