@@ -23,6 +23,7 @@ namespace DiskBurner
         private ProgressBar progressTrack;
 
         private Button btnBuild;
+        private Button btnShareVideo;
         private Button btnBuildMp3List;
         private Button btnCancel;
         private Button btnOutputFolder;
@@ -52,6 +53,7 @@ namespace DiskBurner
             txtLog = new RichTextBox();
             progressBar1 = new ProgressBar();
             btnBuild = new Button();
+            btnShareVideo = new Button();
             btnBuildMp3List = new Button();
             lblTitle = new Label();
             lblArtist = new Label();
@@ -146,6 +148,17 @@ namespace DiskBurner
             btnBuild.Text = "Build Album";
             btnBuild.UseVisualStyleBackColor = true;
             btnBuild.Click += btnBuild_Click;
+            //
+            // btnShareVideo
+            //
+            btnShareVideo.ForeColor = SystemColors.ActiveCaptionText;
+            btnShareVideo.Location = new Point(14, 407);
+            btnShareVideo.Name = "btnShareVideo";
+            btnShareVideo.Size = new Size(377, 25);
+            btnShareVideo.TabIndex = 21;
+            btnShareVideo.Text = "Make Share Video (.mp4)";
+            btnShareVideo.UseVisualStyleBackColor = true;
+            btnShareVideo.Click += btnShareVideo_Click;
             //
             // btnBuildMp3List
             //
@@ -281,6 +294,7 @@ namespace DiskBurner
             AutoScaleMode = AutoScaleMode.Font;
             BackColor = SystemColors.ActiveCaptionText;
             ClientSize = new Size(914, 663);
+            Controls.Add(btnShareVideo);
             Controls.Add(btnBurn);
             Controls.Add(btnBuildMp3List);
             Controls.Add(btnBrowseCover);
