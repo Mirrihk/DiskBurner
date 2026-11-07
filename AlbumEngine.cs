@@ -438,6 +438,96 @@ public sealed class AlbumEngine
         Status?.Invoke("MP3 tracks ready");
     }
 
+    public async Task CreatePlaylistVideoAsync(
+        string playlistPath, string coverPath, string outputPath, CancellationToken ct = default)
+    {
+        ValidateToolPaths();
+        playlistPath = Path.GetFullPath(playlistPath);
+        outputPath = Path.GetFullPath(outputPath);
+        coverPath = Path.GetFullPath(coverPath);
+        if (!File.Exists(coverPath))
+            throw new FileNotFoundException("Choose a cover image for the video.", coverPath);
+
+        var folder = Path.GetDirectoryName(playlistPath)!;
+        var tracks = File.ReadAllLines(playlistPath)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0 && !line.StartsWith("#"))
+            .Select(line => Path.GetFullPath(Path.Combine(folder, line)))
+            .ToList();
+
+        if (tracks.Count == 0)
+            throw new InvalidOperationException("This playlist has no tracks.");
+
+        foreach (var track in tracks)
+        {
+            if (!string.Equals(Path.GetExtension(track), ".mp3", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Select an exported playlist containing local MP3 files.");
+            if (!File.Exists(track))
+                throw new FileNotFoundException("A playlist track is missing. Keep the playlist and MP3s together.", track);
+        }
+
+        var work = Path.Combine(Path.GetTempPath(), "DiskBurner-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(work);
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        var temporaryVideo = Path.Combine(Path.GetDirectoryName(outputPath)!, $".share-{Guid.NewGuid():N}.mp4");
+
+        try
+        {
+            var concat = new StringBuilder();
+            // Normalize tracks before concatenating, including MP3s with embedded cover streams.
+            for (int i = 0; i < tracks.Count; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Status?.Invoke($"Preparing song {i + 1} of {tracks.Count}…");
+                LogMessage?.Invoke($"Preparing share video: {Path.GetFileName(tracks[i])}");
+                var name = $"{i + 1:D4}.wav";
+                var result = await Proc.RunAsync(FfmpegPath, new[]
+                {
+                    "-y", "-i", tracks[i], "-map", "0:a:0", "-vn",
+                    "-ac", "2", "-ar", "44100", "-codec:a", "pcm_s16le",
+                    Path.Combine(work, name)
+                }, ct);
+                if (!result.Ok)
+                    throw new InvalidOperationException("Could not prepare a playlist track:\n" + result.Output);
+                concat.AppendLine($"file '{name}'");
+                Progress?.Invoke((i + 1) * 60 / tracks.Count);
+            }
+
+            var concatPath = Path.Combine(work, "tracks.txt");
+            await File.WriteAllTextAsync(concatPath, concat.ToString(), new UTF8Encoding(false), ct);
+            Status?.Invoke("Creating share video…");
+            LogMessage?.Invoke("Creating one MP4 with your shared cover. This can take a few minutes.");
+
+            var video = await Proc.RunAsync(FfmpegPath, new[]
+            {
+                "-y", "-f", "concat", "-safe", "1", "-i", concatPath,
+                "-loop", "1", "-framerate", "24", "-i", coverPath,
+                "-map", "0:a:0", "-map", "1:v:0",
+                "-codec:a", "aac", "-b:a", "192k",
+                "-codec:v", "libx264", "-preset", "veryfast", "-tune", "stillimage",
+                "-profile:v", "baseline", "-level:v", "3.1", "-crf", "23",
+                "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1",
+                "-pix_fmt", "yuv420p", "-shortest", "-movflags", "+faststart",
+                "-metadata", $"title={Path.GetFileNameWithoutExtension(playlistPath)}",
+                temporaryVideo
+            }, ct);
+
+            if (!video.Ok || !File.Exists(temporaryVideo))
+                throw new InvalidOperationException("Share video creation failed:\n" + video.Output);
+
+            ct.ThrowIfCancellationRequested();
+            File.Move(temporaryVideo, outputPath, overwrite: true);
+            Progress?.Invoke(100);
+            Status?.Invoke("Share video ready");
+            LogMessage?.Invoke($"Share this one file: {outputPath}");
+        }
+        finally
+        {
+            SafeDelete(temporaryVideo);
+            try { Directory.Delete(work, recursive: true); } catch { }
+        }
+    }
+
     public string GenerateMp3Playlist(AlbumProject project)
     {
         var tracks = project.Tracks
